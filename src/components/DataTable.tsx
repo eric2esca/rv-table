@@ -1,7 +1,14 @@
-import React, { useEffect, useState, useMemo } from 'react';
+// src/components/DataTable.tsx
+import React, { useEffect, useState, useMemo, useRef, UIEvent } from 'react';
 import axios from 'axios';
 import styled from 'styled-components';
-import { InfiniteLoader, Table, Column, AutoSizer } from 'react-virtualized';
+import {
+	Table,
+	Column,
+	AutoSizer,
+	TableHeaderProps,
+	Index,
+} from 'react-virtualized';
 import {
 	DragDropContext,
 	Droppable,
@@ -37,6 +44,7 @@ const TableContainer = styled.div`
 	width: 100%;
 	height: 600px;
 	margin: 20px auto;
+	border: 1px solid #ddd;
 `;
 
 const ControlsContainer = styled.div`
@@ -47,16 +55,23 @@ const ControlsContainer = styled.div`
 // Main DataTable Component
 //
 const DataTable: React.FC = () => {
-	// Data state and paging
+	// ----- Data and Paging States -----
+	// We use "minPage" and "maxPage" to keep track of which pages are currently loaded.
+	// (For this demo, we start at page 1. In a real-world scenario you might start in the middle.)
 	const [users, setUsers] = useState<User[]>([]);
+	const [minPage, setMinPage] = useState<number>(1);
+	const [maxPage, setMaxPage] = useState<number>(1);
 	const [loading, setLoading] = useState<boolean>(false);
-	const [page, setPage] = useState<number>(1);
 
-	// Sorting state
+	// We'll use these constants for our paging/infinite scroll
+	const pageSize = 50;
+	const rowHeight = 40;
+
+	// ----- Sorting State -----
 	const [sortBy, setSortBy] = useState<string>('');
 	const [sortDirection, setSortDirection] = useState<'ASC' | 'DESC'>('ASC');
 
-	// Column configuration state
+	// ----- Column Configuration State -----
 	const [columns, setColumns] = useState<ColumnConfig[]>([
 		{
 			label: 'Name',
@@ -86,19 +101,24 @@ const DataTable: React.FC = () => {
 		},
 	]);
 
-	// Filtering state (keyed by column dataKey)
+	// ----- Filtering State -----
 	const [filters, setFilters] = useState<{ [key: string]: string }>({});
 
-	//
-	// Helper: Sort a list of users given a column and direction.
-	//
+	// ----- Controlled Scroll Position -----
+	// We use this state to control the scroll offset (especially when prepending new rows)
+	const [scrollTop, setScrollTop] = useState<number>(0);
+
+	// A ref to the Table component so we can (if needed) adjust scroll position manually.
+	const tableRef = useRef<Table>(null);
+
+	// ----- Helper: Sort the list of users -----
 	const sortList = (
 		list: User[],
 		sortBy: string,
 		sortDirection: 'ASC' | 'DESC'
 	): User[] => {
 		return [...list].sort((a, b) => {
-			let aValue, bValue;
+			let aValue: string, bValue: string;
 			if (sortBy === 'name') {
 				aValue = a.name.first;
 				bValue = b.name.first;
@@ -114,30 +134,29 @@ const DataTable: React.FC = () => {
 		});
 	};
 
-	//
-	// Initial data fetch on mount.
-	//
+	// ----- Initial Data Fetch -----
+	// We load page 1 on mount.
 	useEffect(() => {
 		const fetchData = async (page: number) => {
 			setLoading(true);
 			try {
 				const response = await axios.get(
-					`https://randomuser.me/api/?results=50&page=${page}`
+					`https://randomuser.me/api/?results=${pageSize}&page=${page}`
 				);
 				const fetchedUsers = response.data.results;
 				setUsers(fetchedUsers);
+				setMinPage(page);
+				setMaxPage(page);
 			} catch (error) {
-				console.error('Error fetching data:', error);
+				console.error('Error fetching initial data:', error);
 			} finally {
 				setLoading(false);
 			}
 		};
-		fetchData(page);
+		fetchData(1);
 	}, []);
 
-	//
-	// Filtering: derive a filtered list from our users and the active filters.
-	//
+	// ----- Filtering: derive a filtered list from our users and active filters -----
 	const filteredUsers = useMemo(() => {
 		return users.filter((user) => {
 			return Object.entries(filters).every(([key, filterValue]) => {
@@ -151,57 +170,77 @@ const DataTable: React.FC = () => {
 		});
 	}, [users, filters]);
 
-	//
-	// InfiniteLoader callback: tells InfiniteLoader whether a given row index has been loaded.
-	//
-	const isRowLoaded = ({ index }: { index: number }) => {
-		return index < filteredUsers.length;
-	};
-
-	//
-	// InfiniteLoader callback: load more rows when needed.
-	//
-	const loadMoreRows = async ({
-		startIndex,
-		stopIndex,
-	}: {
-		startIndex: number;
-		stopIndex: number;
-	}) => {
-		if (loading) return;
+	// ----- Upward & Downward Loading Functions -----
+	// When scrolling near the top, load previous (earlier) page and prepend.
+	const loadMoreRowsUpward = async () => {
+		// For this demo, we stop at page 1.
+		if (minPage <= 1 || loading) return;
 		setLoading(true);
-		const nextPage = page + 1;
+		const newPage = minPage - 1;
 		try {
 			const response = await axios.get(
-				`https://randomuser.me/api/?results=50&page=${nextPage}`
+				`https://randomuser.me/api/?results=${pageSize}&page=${newPage}`
 			);
-			const newUsers = response.data.results;
-			let combinedUsers = [...users, ...newUsers];
-			if (sortBy) {
-				combinedUsers = sortList(combinedUsers, sortBy, sortDirection);
-			}
-			setUsers(combinedUsers);
-			setPage(nextPage);
+			const newUsers: User[] = response.data.results;
+			setUsers((prev) => [...newUsers, ...prev]);
+			setMinPage(newPage);
+			// Adjust scrollTop so that the content appears to remain in place.
+			setScrollTop((prev) => prev + newUsers.length * rowHeight);
 		} catch (error) {
-			console.error('Error loading more rows:', error);
+			console.error('Error loading upward rows:', error);
 		} finally {
 			setLoading(false);
 		}
 	};
 
-	//
-	// rowGetter: returns the user data for a given row.
-	//
-	const rowGetter = ({ index }: { index: number }): User | {} => {
-		if (index < filteredUsers.length) {
-			return filteredUsers[index];
+	// When scrolling near the bottom, load next page and append.
+	const loadMoreRowsDownward = async () => {
+		if (loading) return;
+		setLoading(true);
+		const newPage = maxPage + 1;
+		try {
+			const response = await axios.get(
+				`https://randomuser.me/api/?results=${pageSize}&page=${newPage}`
+			);
+			const newUsers: User[] = response.data.results;
+			let combinedUsers = [...users, ...newUsers];
+			if (sortBy) {
+				combinedUsers = sortList(combinedUsers, sortBy, sortDirection);
+			}
+			setUsers(combinedUsers);
+			setMaxPage(newPage);
+		} catch (error) {
+			console.error('Error loading downward rows:', error);
+		} finally {
+			setLoading(false);
 		}
-		return {};
 	};
 
-	//
-	// Sorting: when the user clicks a header, update sort state and sort the data.
-	//
+	// ----- Custom Scroll Handler for Both Directions -----
+	const handleTableScroll = ({
+		scrollTop: newScrollTop,
+		clientHeight,
+		scrollHeight,
+	}: {
+		scrollTop: number;
+		clientHeight: number;
+		scrollHeight: number;
+	}) => {
+		// Update our controlled scroll position.
+		setScrollTop(newScrollTop);
+
+		const threshold = 50; // pixels
+		if (newScrollTop < threshold && minPage > 1 && !loading) {
+			// Near top – load upward rows.
+			loadMoreRowsUpward();
+		}
+		if (newScrollTop + clientHeight > scrollHeight - threshold && !loading) {
+			// Near bottom – load downward rows.
+			loadMoreRowsDownward();
+		}
+	};
+
+	// ----- Sorting Handler -----
 	const handleSort = ({
 		sortBy: newSortBy,
 		sortDirection: newSortDirection,
@@ -215,9 +254,7 @@ const DataTable: React.FC = () => {
 		setUsers(sortedUsers);
 	};
 
-	//
-	// Drag & Drop: When a drag ends, update the column order.
-	//
+	// ----- Drag & Drop Handler for Column Reordering -----
 	const handleDragEnd = (result: DropResult) => {
 		if (!result.destination) return;
 		const newColumns = Array.from(columns);
@@ -226,9 +263,7 @@ const DataTable: React.FC = () => {
 		setColumns(newColumns);
 	};
 
-	//
-	// Toggle whether a column is visible.
-	//
+	// ----- Toggle Column Visibility -----
 	const toggleColumnVisibility = (dataKey: string) => {
 		setColumns((prev) =>
 			prev.map((col) =>
@@ -237,19 +272,15 @@ const DataTable: React.FC = () => {
 		);
 	};
 
-	//
-	// Update the filter value for a column.
-	//
+	// ----- Filter Change Handler -----
 	const handleFilterChange = (dataKey: string, value: string) => {
 		setFilters((prev) => ({ ...prev, [dataKey]: value }));
 	};
 
-	//
-	// Render a custom header row that uses react-beautiful-dnd
-	//
-	const headerRowRenderer = (headerProps: any) => {
+	// ----- Custom Header Renderer using Drag & Drop -----
+	// We wrap header cells in react-beautiful-dnd components.
+	const headerRowRenderer = (headerProps: TableHeaderProps) => {
 		const { className, style } = headerProps;
-		// Use only the visible columns
 		const visibleColumns = columns.filter((col) => col.isVisible);
 		return (
 			<DragDropContext onDragEnd={handleDragEnd}>
@@ -299,9 +330,7 @@ const DataTable: React.FC = () => {
 		);
 	};
 
-	//
-	// Export the current (filtered) view as a CSV.
-	//
+	// ----- CSV Export Handler -----
 	const exportToCSV = () => {
 		const visibleColumns = columns.filter((col) => col.isVisible);
 		const header = visibleColumns.map((col) => col.label).join(',');
@@ -325,6 +354,14 @@ const DataTable: React.FC = () => {
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
+	};
+
+	// ----- rowGetter for the Table -----
+	const rowGetter = ({ index }: Index): User | {} => {
+		if (index < filteredUsers.length) {
+			return filteredUsers[index];
+		}
+		return {};
 	};
 
 	return (
@@ -377,45 +414,41 @@ const DataTable: React.FC = () => {
 
 			{/* The Table */}
 			<TableContainer>
-				{loading && <div>Loading...</div>}
-				<InfiniteLoader
-					isRowLoaded={isRowLoaded}
-					loadMoreRows={loadMoreRows}
-					rowCount={filteredUsers.length + 1}
-				>
-					{({ onRowsRendered, registerChild }) => (
-						<AutoSizer>
-							{({ height, width }) => (
-								<Table
-									ref={registerChild}
-									width={width}
-									height={height}
-									headerHeight={50}
-									rowHeight={40}
-									rowCount={filteredUsers.length + 1}
-									rowGetter={rowGetter}
-									onRowsRendered={onRowsRendered}
-									sort={handleSort}
-									sortBy={sortBy}
-									sortDirection={sortDirection}
-									headerRowRenderer={headerRowRenderer}
-								>
-									{columns
-										.filter((col) => col.isVisible)
-										.map((col) => (
-											<Column
-												key={col.dataKey}
-												label={col.label}
-												dataKey={col.dataKey}
-												width={col.width}
-												cellRenderer={col.cellRenderer}
-											/>
-										))}
-								</Table>
-							)}
-						</AutoSizer>
+				{loading && <div style={{ padding: '10px' }}>Loading...</div>}
+				<AutoSizer>
+					{({ height, width }) => (
+						<Table
+							ref={tableRef}
+							width={width}
+							height={height}
+							headerHeight={50}
+							rowHeight={rowHeight}
+							rowCount={filteredUsers.length}
+							rowGetter={rowGetter}
+							// Pass our custom scroll handler and controlled scrollTop value:
+							scrollTop={scrollTop}
+							onScroll={({ scrollTop, clientHeight, scrollHeight }) =>
+								handleTableScroll({ scrollTop, clientHeight, scrollHeight })
+							}
+							sort={handleSort}
+							sortBy={sortBy}
+							sortDirection={sortDirection}
+							headerRowRenderer={headerRowRenderer}
+						>
+							{columns
+								.filter((col) => col.isVisible)
+								.map((col) => (
+									<Column
+										key={col.dataKey}
+										label={col.label}
+										dataKey={col.dataKey}
+										width={col.width}
+										cellRenderer={col.cellRenderer}
+									/>
+								))}
+						</Table>
 					)}
-				</InfiniteLoader>
+				</AutoSizer>
 			</TableContainer>
 		</>
 	);
