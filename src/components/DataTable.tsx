@@ -56,14 +56,10 @@ const ControlsContainer = styled.div`
 //
 const DataTable: React.FC = () => {
 	// ----- Data and Paging States -----
-	// We use "minPage" and "maxPage" to keep track of which pages are currently loaded.
-	// (For this demo, we start at page 1. In a real-world scenario you might start in the middle.)
 	const [users, setUsers] = useState<User[]>([]);
 	const [minPage, setMinPage] = useState<number>(1);
 	const [maxPage, setMaxPage] = useState<number>(1);
 	const [loading, setLoading] = useState<boolean>(false);
-
-	// We'll use these constants for our paging/infinite scroll
 	const pageSize = 50;
 	const rowHeight = 40;
 
@@ -105,10 +101,7 @@ const DataTable: React.FC = () => {
 	const [filters, setFilters] = useState<{ [key: string]: string }>({});
 
 	// ----- Controlled Scroll Position -----
-	// We use this state to control the scroll offset (especially when prepending new rows)
 	const [scrollTop, setScrollTop] = useState<number>(0);
-
-	// A ref to the Table component so we can (if needed) adjust scroll position manually.
 	const tableRef = useRef<Table>(null);
 
 	// ----- Helper: Sort the list of users -----
@@ -135,7 +128,6 @@ const DataTable: React.FC = () => {
 	};
 
 	// ----- Initial Data Fetch -----
-	// We load page 1 on mount.
 	useEffect(() => {
 		const fetchData = async (page: number) => {
 			setLoading(true);
@@ -156,7 +148,7 @@ const DataTable: React.FC = () => {
 		fetchData(1);
 	}, []);
 
-	// ----- Filtering: derive a filtered list from our users and active filters -----
+	// ----- Filtering: derive filtered list from users and filters -----
 	const filteredUsers = useMemo(() => {
 		return users.filter((user) => {
 			return Object.entries(filters).every(([key, filterValue]) => {
@@ -171,9 +163,7 @@ const DataTable: React.FC = () => {
 	}, [users, filters]);
 
 	// ----- Upward & Downward Loading Functions -----
-	// When scrolling near the top, load previous (earlier) page and prepend.
 	const loadMoreRowsUpward = async () => {
-		// For this demo, we stop at page 1.
 		if (minPage <= 1 || loading) return;
 		setLoading(true);
 		const newPage = minPage - 1;
@@ -184,7 +174,6 @@ const DataTable: React.FC = () => {
 			const newUsers: User[] = response.data.results;
 			setUsers((prev) => [...newUsers, ...prev]);
 			setMinPage(newPage);
-			// Adjust scrollTop so that the content appears to remain in place.
 			setScrollTop((prev) => prev + newUsers.length * rowHeight);
 		} catch (error) {
 			console.error('Error loading upward rows:', error);
@@ -193,7 +182,6 @@ const DataTable: React.FC = () => {
 		}
 	};
 
-	// When scrolling near the bottom, load next page and append.
 	const loadMoreRowsDownward = async () => {
 		if (loading) return;
 		setLoading(true);
@@ -226,32 +214,35 @@ const DataTable: React.FC = () => {
 		clientHeight: number;
 		scrollHeight: number;
 	}) => {
-		// Update our controlled scroll position.
 		setScrollTop(newScrollTop);
-
-		const threshold = 50; // pixels
+		const threshold = 50;
 		if (newScrollTop < threshold && minPage > 1 && !loading) {
-			// Near top – load upward rows.
 			loadMoreRowsUpward();
 		}
 		if (newScrollTop + clientHeight > scrollHeight - threshold && !loading) {
-			// Near bottom – load downward rows.
 			loadMoreRowsDownward();
 		}
 	};
 
 	// ----- Sorting Handler -----
-	const handleSort = ({
-		sortBy: newSortBy,
-		sortDirection: newSortDirection,
-	}: {
+	const handleSort = (params: {
 		sortBy: string;
 		sortDirection: 'ASC' | 'DESC';
 	}) => {
-		setSortBy(newSortBy);
-		setSortDirection(newSortDirection);
-		const sortedUsers = sortList(users, newSortBy, newSortDirection);
+		setSortBy(params.sortBy);
+		setSortDirection(params.sortDirection);
+		const sortedUsers = sortList(users, params.sortBy, params.sortDirection);
 		setUsers(sortedUsers);
+	};
+
+	// Toggle sort order for a column (used by the header cells)
+	const toggleSort = (dataKey: string) => {
+		if (sortBy === dataKey) {
+			const newSortDirection = sortDirection === 'ASC' ? 'DESC' : 'ASC';
+			handleSort({ sortBy: dataKey, sortDirection: newSortDirection });
+		} else {
+			handleSort({ sortBy: dataKey, sortDirection: 'ASC' });
+		}
 	};
 
 	// ----- Drag & Drop Handler for Column Reordering -----
@@ -277,50 +268,92 @@ const DataTable: React.FC = () => {
 		setFilters((prev) => ({ ...prev, [dataKey]: value }));
 	};
 
-	// ----- Custom Header Renderer using Drag & Drop -----
-	// We wrap header cells in react-beautiful-dnd components.
+	// ----- Header Cell Component with Drag & Drop and Sorting -----
+	interface HeaderCellProps {
+		column: ColumnConfig;
+		index: number;
+	}
+	const HeaderCell: React.FC<HeaderCellProps> = ({ column, index }) => {
+		return (
+			<Draggable
+				draggableId={column.dataKey}
+				index={index}
+			>
+				{(provided, snapshot) => (
+					<div
+						ref={provided.innerRef}
+						{...provided.draggableProps}
+						style={{
+							...provided.draggableProps.style,
+							width: column.width,
+							padding: '5px 10px',
+							borderRight: '1px solid #ddd',
+							backgroundColor: snapshot.isDragging ? '#d0d0d0' : '#f7f7f7',
+							display: 'flex',
+							alignItems: 'center',
+						}}
+					>
+						{/* Drag handle */}
+						<div
+							{...provided.dragHandleProps}
+							style={{ marginRight: '5px', cursor: 'grab', userSelect: 'none' }}
+						>
+							☰
+						</div>
+						{/* Column label (clicking toggles sorting) */}
+						<div
+							style={{ flexGrow: 1, cursor: 'pointer', userSelect: 'none' }}
+							onClick={() => toggleSort(column.dataKey)}
+						>
+							{column.label}
+						</div>
+						{/* Sorting Button */}
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								toggleSort(column.dataKey);
+							}}
+							style={{
+								cursor: 'pointer',
+								background: 'none',
+								border: 'none',
+								padding: 0,
+								fontSize: 'inherit',
+							}}
+						>
+							{sortBy === column.dataKey
+								? sortDirection === 'ASC'
+									? '▲'
+									: '▼'
+								: '↕'}
+						</button>
+					</div>
+				)}
+			</Draggable>
+		);
+	};
+
+	// ----- Header Row Renderer using Drag & Drop -----
 	const headerRowRenderer = (headerProps: TableHeaderProps) => {
-		const { className, style } = headerProps;
 		const visibleColumns = columns.filter((col) => col.isVisible);
 		return (
 			<DragDropContext onDragEnd={handleDragEnd}>
 				<Droppable
-					droppableId='droppable'
+					droppableId='header-droppable'
 					direction='horizontal'
 				>
 					{(provided) => (
 						<div
-							className={className}
-							style={{ ...style, display: 'flex' }}
 							ref={provided.innerRef}
 							{...provided.droppableProps}
+							style={{ display: 'flex', ...headerProps.style }}
 						>
-							{visibleColumns.map((column, index) => (
-								<Draggable
-									key={column.dataKey}
-									draggableId={column.dataKey}
+							{visibleColumns.map((col, index) => (
+								<HeaderCell
+									key={col.dataKey}
+									column={col}
 									index={index}
-								>
-									{(provided) => (
-										<div
-											ref={provided.innerRef}
-											{...provided.draggableProps}
-											{...provided.dragHandleProps}
-											style={{
-												...provided.draggableProps.style,
-												width: column.width,
-												padding: '5px 10px',
-												borderRight: '1px solid #ddd',
-												boxSizing: 'border-box',
-												textAlign: 'left',
-												backgroundColor: '#f7f7f7',
-												cursor: 'move',
-											}}
-										>
-											{column.label}
-										</div>
-									)}
-								</Draggable>
+								/>
 							))}
 							{provided.placeholder}
 						</div>
@@ -346,7 +379,9 @@ const DataTable: React.FC = () => {
 				.join(',');
 		});
 		const csvString = [header, ...csvRows].join('\n');
-		const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+		const blob = new Blob([csvString], {
+			type: 'text/csv;charset=utf-8;',
+		});
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement('a');
 		link.setAttribute('href', url);
@@ -356,7 +391,7 @@ const DataTable: React.FC = () => {
 		document.body.removeChild(link);
 	};
 
-	// ----- rowGetter for the Table -----
+	// ----- Row Getter for the Table -----
 	const rowGetter = ({ index }: Index): User | {} => {
 		if (index < filteredUsers.length) {
 			return filteredUsers[index];
@@ -425,14 +460,10 @@ const DataTable: React.FC = () => {
 							rowHeight={rowHeight}
 							rowCount={filteredUsers.length}
 							rowGetter={rowGetter}
-							// Pass our custom scroll handler and controlled scrollTop value:
 							scrollTop={scrollTop}
 							onScroll={({ scrollTop, clientHeight, scrollHeight }) =>
 								handleTableScroll({ scrollTop, clientHeight, scrollHeight })
 							}
-							sort={handleSort}
-							sortBy={sortBy}
-							sortDirection={sortDirection}
 							headerRowRenderer={headerRowRenderer}
 						>
 							{columns
