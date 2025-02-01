@@ -1,5 +1,5 @@
 // src/components/DataTable.tsx
-import React, { useEffect, useState, useMemo, useRef, UIEvent } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import axios from 'axios';
 import styled from 'styled-components';
 import {
@@ -15,6 +15,7 @@ import {
 	Draggable,
 	DropResult,
 } from 'react-beautiful-dnd';
+import { StrictModeDroppable } from './StrictModeDroppable';
 import 'react-virtualized/styles.css';
 
 //
@@ -174,6 +175,7 @@ const DataTable: React.FC = () => {
 			const newUsers: User[] = response.data.results;
 			setUsers((prev) => [...newUsers, ...prev]);
 			setMinPage(newPage);
+			// Adjust scrollTop so content remains stable
 			setScrollTop((prev) => prev + newUsers.length * rowHeight);
 		} catch (error) {
 			console.error('Error loading upward rows:', error);
@@ -235,7 +237,7 @@ const DataTable: React.FC = () => {
 		setUsers(sortedUsers);
 	};
 
-	// Toggle sort order for a column (used by the header cells)
+	// Toggle sort order for a column (used by header cells)
 	const toggleSort = (dataKey: string) => {
 		if (sortBy === dataKey) {
 			const newSortDirection = sortDirection === 'ASC' ? 'DESC' : 'ASC';
@@ -296,11 +298,15 @@ const DataTable: React.FC = () => {
 						{/* Drag handle */}
 						<div
 							{...provided.dragHandleProps}
-							style={{ marginRight: '5px', cursor: 'grab', userSelect: 'none' }}
+							style={{
+								marginRight: '5px',
+								cursor: 'grab',
+								userSelect: 'none',
+							}}
 						>
 							☰
 						</div>
-						{/* Column label (clicking toggles sorting) */}
+						{/* Column label (click toggles sorting) */}
 						<div
 							style={{ flexGrow: 1, cursor: 'pointer', userSelect: 'none' }}
 							onClick={() => toggleSort(column.dataKey)}
@@ -333,33 +339,31 @@ const DataTable: React.FC = () => {
 		);
 	};
 
-	// ----- Header Row Renderer using Drag & Drop -----
+	// ----- Header Row Renderer using Droppable -----
 	const headerRowRenderer = (headerProps: TableHeaderProps) => {
 		const visibleColumns = columns.filter((col) => col.isVisible);
 		return (
-			<DragDropContext onDragEnd={handleDragEnd}>
-				<Droppable
-					droppableId='header-droppable'
-					direction='horizontal'
-				>
-					{(provided) => (
-						<div
-							ref={provided.innerRef}
-							{...provided.droppableProps}
-							style={{ display: 'flex', ...headerProps.style }}
-						>
-							{visibleColumns.map((col, index) => (
-								<HeaderCell
-									key={col.dataKey}
-									column={col}
-									index={index}
-								/>
-							))}
-							{provided.placeholder}
-						</div>
-					)}
-				</Droppable>
-			</DragDropContext>
+			<StrictModeDroppable
+				droppableId='header-droppable'
+				direction='horizontal'
+			>
+				{(provided) => (
+					<div
+						ref={provided.innerRef}
+						{...provided.droppableProps}
+						style={{ display: 'flex', ...headerProps.style }}
+					>
+						{visibleColumns.map((col, index) => (
+							<HeaderCell
+								key={col.dataKey}
+								column={col}
+								index={index}
+							/>
+						))}
+						{provided.placeholder}
+					</div>
+				)}
+			</StrictModeDroppable>
 		);
 	};
 
@@ -447,40 +451,42 @@ const DataTable: React.FC = () => {
 				</button>
 			</ControlsContainer>
 
-			{/* The Table */}
-			<TableContainer>
-				{loading && <div style={{ padding: '10px' }}>Loading...</div>}
-				<AutoSizer>
-					{({ height, width }) => (
-						<Table
-							ref={tableRef}
-							width={width}
-							height={height}
-							headerHeight={50}
-							rowHeight={rowHeight}
-							rowCount={filteredUsers.length}
-							rowGetter={rowGetter}
-							scrollTop={scrollTop}
-							onScroll={({ scrollTop, clientHeight, scrollHeight }) =>
-								handleTableScroll({ scrollTop, clientHeight, scrollHeight })
-							}
-							headerRowRenderer={headerRowRenderer}
-						>
-							{columns
-								.filter((col) => col.isVisible)
-								.map((col) => (
-									<Column
-										key={col.dataKey}
-										label={col.label}
-										dataKey={col.dataKey}
-										width={col.width}
-										cellRenderer={col.cellRenderer}
-									/>
-								))}
-						</Table>
-					)}
-				</AutoSizer>
-			</TableContainer>
+			{/* Wrap the Table in a DragDropContext */}
+			<DragDropContext onDragEnd={handleDragEnd}>
+				<TableContainer>
+					{loading && <div style={{ padding: '10px' }}>Loading...</div>}
+					<AutoSizer>
+						{({ height, width }) => (
+							<Table
+								ref={tableRef}
+								width={width}
+								height={height}
+								headerHeight={50}
+								rowHeight={rowHeight}
+								rowCount={filteredUsers.length}
+								rowGetter={rowGetter}
+								scrollTop={scrollTop}
+								onScroll={({ scrollTop, clientHeight, scrollHeight }) =>
+									handleTableScroll({ scrollTop, clientHeight, scrollHeight })
+								}
+								headerRowRenderer={headerRowRenderer}
+							>
+								{columns
+									.filter((col) => col.isVisible)
+									.map((col) => (
+										<Column
+											key={col.dataKey}
+											label={col.label}
+											dataKey={col.dataKey}
+											width={col.width}
+											cellRenderer={col.cellRenderer}
+										/>
+									))}
+							</Table>
+						)}
+					</AutoSizer>
+				</TableContainer>
+			</DragDropContext>
 		</>
 	);
 };
