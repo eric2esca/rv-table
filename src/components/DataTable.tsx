@@ -9,34 +9,29 @@ import {
 	TableHeaderProps,
 	Index,
 } from 'react-virtualized';
-import {
-	DragDropContext,
-	Droppable,
-	Draggable,
-	DropResult,
-} from 'react-beautiful-dnd';
+import { DragDropContext, Draggable, DropResult } from 'react-beautiful-dnd';
 import { StrictModeDroppable } from './StrictModeDroppable';
 import 'react-virtualized/styles.css';
 
 //
 // Type Definitions
 //
-interface User {
+type User = {
 	name: {
 		first: string;
 		last: string;
 	};
 	email: string;
 	phone: string;
-}
+};
 
-interface ColumnConfig {
+type ColumnConfig = {
 	label: string;
 	dataKey: string;
 	width: number;
 	isVisible: boolean;
 	cellRenderer?: (props: any) => JSX.Element | string;
-}
+};
 
 //
 // Styled Components
@@ -271,10 +266,11 @@ const DataTable: React.FC = () => {
 	};
 
 	// ----- Header Cell Component with Drag & Drop and Sorting -----
-	interface HeaderCellProps {
+	type HeaderCellProps = {
 		column: ColumnConfig;
 		index: number;
-	}
+	};
+
 	const HeaderCell: React.FC<HeaderCellProps> = ({ column, index }) => {
 		return (
 			<Draggable
@@ -332,6 +328,23 @@ const DataTable: React.FC = () => {
 									? '▲'
 									: '▼'
 								: '↕'}
+						</button>
+						{/* Hide Column Button */}
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								toggleColumnVisibility(column.dataKey);
+							}}
+							style={{
+								cursor: 'pointer',
+								background: 'none',
+								border: 'none',
+								padding: '0 5px',
+								fontSize: 'inherit',
+							}}
+							title='Hide column'
+						>
+							👁️
 						</button>
 					</div>
 				)}
